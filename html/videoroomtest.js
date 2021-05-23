@@ -332,6 +332,15 @@ $(document).ready(function() {
 								onremotestream: function(stream) {
 									// The publisher stream is sendonly, we don't expect anything here
 								},
+								ondataopen: function(data) {
+                                                                    Janus.log("The DataChannel is available!");
+                                                                    $('#myvideo').removeClass('hide').show();
+                                                                    $('#datasend').removeAttr('disabled');
+                                                                },
+                                                                ondata: function(data) {
+                                                                    Janus.log("We got data from the DataChannel!", data);
+                                                                    //$('#datarecv1').val(data);
+                                                                },
 								oncleanup: function() {
 									Janus.log(" ::: Got a cleanup notification: we are unpublished now :::");
 									mystream = null;
@@ -410,7 +419,7 @@ function publishOwnFeed(useAudio) {
 	sfutest.createOffer(
 		{
 			// Add data:true here if you want to publish datachannels as well
-			media: { audioRecv: false, videoRecv: false, audioSend: useAudio, videoSend: true },	// Publishers are sendonly
+			media: { audioRecv: false, videoRecv: false, audioSend: useAudio, videoSend: true, data: true },	// Publishers are sendonly
 			// If you want to test simulcasting (Chrome and Firefox only), then
 			// pass a ?simulcast=true when opening this demo page: it will turn
 			// the following 'simulcast' property to pass to janus.js to true
@@ -418,7 +427,7 @@ function publishOwnFeed(useAudio) {
 			simulcast2: doSimulcast2,
 			success: function(jsep) {
 				Janus.debug("Got publisher SDP!", jsep);
-				var publish = { request: "configure", audio: useAudio, video: true };
+				var publish = { request: "configure", audio: useAudio, video: true, data: true };
 				// You can force a specific codec to use when publishing by using the
 				// audiocodec and videocodec properties, for instance:
 				// 		publish["audiocodec"] = "opus"
@@ -505,6 +514,13 @@ function newRemoteFeed(id, display, audio, video) {
 				Janus.error("  -- Error attaching plugin...", error);
 				bootbox.alert("Error attaching plugin... " + error);
 			},
+                        ondataopen: function(data) {
+                            	Janus.log("The [remote] DataChannel is available!");
+                        },
+                        ondata: function(data) {
+				Janus.log("We got data from the [remote] DataChannel!", data);
+                           	$('#datarecv'+remoteFeed.rfindex).val(data);
+                        },
 			onmessage: function(msg, jsep) {
 				Janus.debug(" ::: Got a message (subscriber) :::", msg);
 				var event = msg["videoroom"];
@@ -556,7 +572,7 @@ function newRemoteFeed(id, display, audio, video) {
 							jsep: jsep,
 							// Add data:true here if you want to subscribe to datachannels as well
 							// (obviously only works if the publisher offered them in the first place)
-							media: { audioSend: false, videoSend: false },	// We want recvonly audio/video
+							media: { audioSend: false, videoSend: false, data:true },	// We want recvonly audio/video
 							success: function(jsep) {
 								Janus.debug("Got SDP!", jsep);
 								var body = { request: "start", room: myroom };
@@ -668,6 +684,29 @@ function getQueryStringValue(name) {
 	var regex = new RegExp("[\\?&]" + name + "=([^&#]*)"),
 		results = regex.exec(location.search);
 	return results === null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
+}
+
+function checkEnter(event) {
+        var theCode = event.keyCode ? event.keyCode : event.which ? event.which : event.charCode;
+        if(theCode == 13) {
+                sendData();
+                return false;
+        } else {
+                return true;
+        }
+}
+
+function sendData() {
+        var data = $('#datasend').val();
+        if(data === "") {
+                bootbox.alert('Insert a message to send on the DataChannel');
+                return;
+        }
+        sfutest.data({
+                text: data,
+                error: function(reason) { bootbox.alert(reason); },
+                success: function() { $('#datasend').val(''); },
+        });
 }
 
 // Helpers to create Simulcast-related UI, if enabled

@@ -5553,8 +5553,9 @@ void janus_videoroom_incoming_data(janus_plugin_session *handle, janus_plugin_da
 		}
 	}
 	janus_mutex_unlock(&participant->rtp_forwarders_mutex);
-	JANUS_LOG(LOG_VERB, "Got a %s DataChannel message (%d bytes) to forward\n",
-		packet->binary ? "binary" : "text", len);
+	JANUS_LOG(LOG_VERB, "Got a %s DataChannel message (%d bytes) to forward to %d subscribers\n",
+		packet->binary ? "binary" : "text", len,
+		participant->subscribers ? g_slist_length(participant->subscribers) : 0);
 	/* Save the message if we're recording */
 	janus_recorder_save_frame(participant->drc, buf, len);
 	/* Relay to all subscribers */
@@ -6025,7 +6026,9 @@ static void *janus_videoroom_handler(void *data) {
 			json_t *ptype = json_object_get(root, "ptype");
 			const char *ptype_text = json_string_value(ptype);
 			if(!strcasecmp(ptype_text, "publisher")) {
-				JANUS_LOG(LOG_VERB, "Configuring new publisher\n");
+				json_t *display = json_object_get(root, "display");
+                                const char *display_text = display ? json_string_value(display) : NULL;
+                                JANUS_LOG(LOG_VERB, "Configuring new publisher %s\n", display_text ? display_text : "noname");
 				JANUS_VALIDATE_JSON_OBJECT(root, publisher_parameters,
 					error_code, error_cause, TRUE,
 					JANUS_VIDEOROOM_ERROR_MISSING_ELEMENT, JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT);
@@ -6061,8 +6064,6 @@ static void *janus_videoroom_handler(void *data) {
 						goto error;
 					}
 				}
-				json_t *display = json_object_get(root, "display");
-				const char *display_text = display ? json_string_value(display) : NULL;
 				guint64 user_id = 0;
 				char user_id_num[30], *user_id_str = NULL;
 				gboolean user_id_allocated = FALSE;
@@ -6367,7 +6368,9 @@ static void *janus_videoroom_handler(void *data) {
 				if(user_id_allocated)
 					g_free(user_id_str);
 			} else if(!strcasecmp(ptype_text, "subscriber") || !strcasecmp(ptype_text, "listener")) {
-				JANUS_LOG(LOG_VERB, "Configuring new subscriber\n");
+                                json_t *display = json_object_get(root, "display");
+                                const char *display_text = display ? json_string_value(display) : NULL;
+                                JANUS_LOG(LOG_VERB, "Configuring new subscriber (%s)\n", display_text ? display_text : "no name");
 				gboolean legacy = !strcasecmp(ptype_text, "listener");
 				if(legacy) {
 					JANUS_LOG(LOG_WARN, "Subscriber is using the legacy 'listener' ptype\n");
@@ -6469,6 +6472,9 @@ static void *janus_videoroom_handler(void *data) {
 					janus_refcount_decrease(&videoroom->ref);
 					goto error;
 				} else {
+					JANUS_LOG(LOG_VERB, "Configuring new subscriber for publisher: (%s)\n",
++                                                 publisher->display ? publisher->display : "no name");
+
 					/* Increase the refcount before unlocking so that nobody can remove and free the publisher in the meantime. */
 					janus_refcount_increase(&publisher->ref);
 					janus_refcount_increase(&publisher->session->ref);
@@ -8113,19 +8119,29 @@ static void janus_videoroom_relay_rtp_packet(gpointer data, gpointer user_data) 
 
 static void janus_videoroom_relay_data_packet(gpointer data, gpointer user_data) {
 	janus_videoroom_rtp_relay_packet *packet = (janus_videoroom_rtp_relay_packet *)user_data;
+	
+	JANUS_LOG(LOG_INFO, "Trying Forwarding %s DataChannel message (%d bytes) to viewer\n",
+                  packet->textdata ? "text" : "binary", packet->length);
+
 	if(!packet || packet->is_rtp || !packet->data || packet->length < 1) {
 		JANUS_LOG(LOG_ERR, "Invalid packet...\n");
 		return;
 	}
 	janus_videoroom_subscriber *subscriber = (janus_videoroom_subscriber *)data;
 	if(!subscriber || !subscriber->session || !subscriber->data || subscriber->paused) {
+	        JANUS_LOG(LOG_INFO, "Forwarding fail on sub: sub:0x%x session:0x%x data:0x%x paused:%d\n",
+                   	  subscriber, subscriber->session, subscriber->data, subscriber->paused);
 		return;
 	}
 	janus_videoroom_session *session = subscriber->session;
 	if(!session || !session->handle) {
+         	JANUS_LOG(LOG_INFO, "Forwarding fail on session: sess:0x%x handle:0x%x\n",
+                   	  session, session->handle);
 		return;
 	}
 	if(!g_atomic_int_get(&session->started) || !g_atomic_int_get(&session->dataready)) {
+	        JANUS_LOG(LOG_INFO, "Forwarding fail on get started:0x%x ready:0x%x\n",
+                   	  session->started, session->dataready);
 		return;
 	}
 	if(gateway != NULL && packet->data != NULL) {
